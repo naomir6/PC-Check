@@ -169,7 +169,7 @@ try {
     $DMAProtection = $false
     if ($VBS.AvailableSecurityProperties -contains 2) { $DMAProtection = $true }
     if ($DMAProtection) {
-        Write-Log " Result: ENABLED (DMA Protection Active)" -Color Green
+        Write-Log " Result: ENABLED" -Color Green
     } else {
         Write-Log " Result: DISABLED or NOT AVAILABLE" -Color Yellow
     }
@@ -460,4 +460,5 @@ Write-Log "Possible Macro Software: $(if($global:SoftwareDetected.Count -gt 0){$
 
 Write-Log "" -NoTimestamp
 Write-Log "Scan complete. Full report saved to: $OutputFile" -NoTimestamp -Color Cyan
+
 Write-Log "============================================================" -NoTimestamp -Color Cyan
