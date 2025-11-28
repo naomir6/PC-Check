@@ -14,6 +14,129 @@ Clear-Host
 
 Write-Host "Hello, $name! The script is now starting..." -ForegroundColor Green
 
+# USB Device Configuration
+$VendorID = "046D"  # Logitech VID
+$DeviceID = "C53B"  # Specific PID to check for
+
+function Get-USBDevices {
+    Write-Host "Scanning USB devices..." -ForegroundColor Blue
+    $desktopPath = [System.Environment]::GetFolderPath('Desktop')
+    $outputFile = Join-Path -Path $desktopPath -ChildPath $logFileName
+    Add-Content -Path $outputFile -Value "`n-----------------"
+    Add-Content -Path $outputFile -Value "USB Device Scan:"
+    
+    try {
+        $AllUSBDevices = Get-PnpDevice | Where-Object { 
+            $_.Class -in @("HIDClass", "USB", "Mouse", "Keyboard") -and $_.Status -eq "OK" 
+        }
+
+        # Deduplicate by VID + PID
+        $Seen = @{}
+        $UniqueDevices = @()
+        foreach ($Device in $AllUSBDevices) {
+            $InstanceID = $Device.InstanceId
+            if ($InstanceID -match 'VID_([0-9A-F]{4}).*PID_([0-9A-F]{4})') {
+                $DeviceVID = $Matches[1]
+                $DevicePID = $Matches[2]
+                $key = "$DeviceVID`_$DevicePID"
+                if (-not $Seen.ContainsKey($key)) {
+                    $Seen[$key] = $true
+                    $UniqueDevices += $Device
+                }
+            }
+        }
+
+        Add-Content -Path $outputFile -Value "Found $($UniqueDevices.Count) unique USB/HID device(s):"
+        $DeviceCount = 0
+        foreach ($Device in $UniqueDevices) {
+            $DeviceCount++
+            $InstanceID = $Device.InstanceId
+            $DeviceVID = if ($InstanceID -match 'VID_([0-9A-F]{4})') { $Matches[1] } else { "Unknown" }
+            $DevicePID = if ($InstanceID -match 'PID_([0-9A-F]{4})') { $Matches[1] } else { "Unknown" }
+            Add-Content -Path $outputFile -Value "  [$DeviceCount] $($Device.FriendlyName) - VEN_$DeviceVID & PID_$DevicePID"
+        }
+    } catch {
+        Add-Content -Path $outputFile -Value "ERROR: Could not enumerate USB devices - $($_.Exception.Message)"
+    }
+}
+
+function Check-XimMatrix {
+    Write-Host "Checking for XIM Matrix devices..." -ForegroundColor Blue
+    $desktopPath = [System.Environment]::GetFolderPath('Desktop')
+    $outputFile = Join-Path -Path $desktopPath -ChildPath $logFileName
+    Add-Content -Path $outputFile -Value "`nXIM Matrix Detection:"
+    
+    $XimLive = $false
+    try {
+        $AllDevices = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq "OK" }
+        foreach ($Device in $AllDevices) {
+            $InstanceID = $Device.InstanceId
+            if ($InstanceID -like "*VID_$VendorID*" -and $InstanceID -like "*PID_$DeviceID*") {
+                $DeviceVID = if ($InstanceID -match 'VID_([0-9A-F]{4})') { $Matches[1] } else { "Unknown" }
+                $DevicePID = if ($InstanceID -match 'PID_([0-9A-F]{4})') { $Matches[1] } else { "Unknown" }
+                Add-Content -Path $outputFile -Value " [DETECTED] XIM Matrix Device Found!"
+                Add-Content -Path $outputFile -Value "     Device Name: $($Device.FriendlyName) - VEN_$DeviceVID & PID_$DevicePID"
+                Add-Content -Path $outputFile -Value "     Status: $($Device.Status)"
+                $XimLive = $true
+            }
+        }
+        
+        if (-not $XimLive) {
+            Add-Content -Path $outputFile -Value " Result: NO XIM MATRIX DEVICE CURRENTLY CONNECTED"
+        }
+    } catch { 
+        Add-Content -Path $outputFile -Value " ERROR: $($_.Exception.Message)"
+    }
+    return $XimLive
+}
+
+function Check-USBRegistry {
+    Write-Host "Checking USB registry for XIM traces..." -ForegroundColor Blue
+    $desktopPath = [System.Environment]::GetFolderPath('Desktop')
+    $outputFile = Join-Path -Path $desktopPath -ChildPath $logFileName
+    Add-Content -Path $outputFile -Value "`nUSB Registry Scan:"
+    
+    $XimRegistry = $false
+    try {
+        $USBEnumPath = "HKLM:\SYSTEM\CurrentControlSet\Enum\USB"
+        if (Test-Path $USBEnumPath) {
+            $USBKeys = Get-ChildItem -Path $USBEnumPath -ErrorAction SilentlyContinue
+            foreach ($Key in $USBKeys) {
+                if ($Key.PSChildName -match "VID_$VendorID.*PID_$DeviceID") {
+                    Add-Content -Path $outputFile -Value " [DETECTED] XIM Registry Entry Found!"
+                    Add-Content -Path $outputFile -Value "     Registry Path: $($Key.PSPath)"
+                    $XimRegistry = $true
+                }
+            }
+        }
+        
+        if (-not $XimRegistry) {
+            Add-Content -Path $outputFile -Value " Result: NO XIM MATRIX REGISTRY TRACES FOUND"
+        }
+    } catch { 
+        Add-Content -Path $outputFile -Value " ERROR: $($_.Exception.Message)"
+    }
+    return $XimRegistry
+}
+
+function Scan-USBDevices {
+    Write-Host "Starting USB device scan..." -ForegroundColor Yellow
+    $desktopPath = [System.Environment]::GetFolderPath('Desktop')
+    $outputFile = Join-Path -Path $desktopPath -ChildPath $logFileName
+    Add-Content -Path $outputFile -Value "`n======================"
+    Add-Content -Path $outputFile -Value "USB DEVICE SCAN RESULTS"
+    Add-Content -Path $outputFile -Value "======================"
+    
+    Get-USBDevices
+    $XimLive = Check-XimMatrix
+    $XimRegistry = Check-USBRegistry
+    
+    $XimFound = $XimLive -or $XimRegistry
+    Add-Content -Path $outputFile -Value "`nOverall Result: $(if($XimFound){'XIM MATRIX DETECTED'}else{'No XIM Matrix Found'})"
+    
+    # Don't return the hashtable to prevent it from being logged
+}
+
 function Get-OneDrivePath {
     $oneDrivePath = (Get-ItemProperty "HKCU:\Software\Microsoft\OneDrive" -Name "UserFolder" -ErrorAction SilentlyContinue).UserFolder
     if (-not $oneDrivePath) {
@@ -623,7 +746,7 @@ function Log-R6AndSteamBanStatus {
     }
 }
 
-# Execute all functions
+# Execute all functions including the new USB scan
 List-BAMStateUserSettings
 Log-WindowsInstallDate
 Find-RarAndExeFiles
@@ -637,6 +760,9 @@ Log-LogitechScripts
 Log-MonitorsEDID
 Log-PCIeDevices
 Log-R6AndSteamBanStatus
+
+# Add the USB device scan (no return value to prevent hashtable logging)
+Scan-USBDevices
 
 # Final steps
 $desktopPath = [System.Environment]::GetFolderPath('Desktop')
