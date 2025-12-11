@@ -22,8 +22,7 @@ function Get-USBDevices {
     Write-Host "Scanning USB devices..." -ForegroundColor Blue
     $desktopPath = [System.Environment]::GetFolderPath('Desktop')
     $outputFile = Join-Path -Path $desktopPath -ChildPath $logFileName
-    Add-Content -Path $outputFile -Value "`n-----------------"
-    Add-Content -Path $outputFile -Value "USB Device Scan:"
+    Add-Content -Path $outputFile -Value "`nUSB DEVICES:"
     
     try {
         $AllUSBDevices = Get-PnpDevice | Where-Object { 
@@ -61,41 +60,22 @@ function Get-USBDevices {
 }
 
 function Check-XimMatrix {
-    Write-Host "Checking for XIM Matrix devices..." -ForegroundColor Blue
-    $desktopPath = [System.Environment]::GetFolderPath('Desktop')
-    $outputFile = Join-Path -Path $desktopPath -ChildPath $logFileName
-    Add-Content -Path $outputFile -Value "`nXIM Matrix Detection:"
-    
     $XimLive = $false
     try {
         $AllDevices = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq "OK" }
         foreach ($Device in $AllDevices) {
             $InstanceID = $Device.InstanceId
             if ($InstanceID -like "*VID_$VendorID*" -and $InstanceID -like "*PID_$DeviceID*") {
-                $DeviceVID = if ($InstanceID -match 'VID_([0-9A-F]{4})') { $Matches[1] } else { "Unknown" }
-                $DevicePID = if ($InstanceID -match 'PID_([0-9A-F]{4})') { $Matches[1] } else { "Unknown" }
-                Add-Content -Path $outputFile -Value " [DETECTED] XIM Matrix Device Found!"
-                Add-Content -Path $outputFile -Value "     Device Name: $($Device.FriendlyName) - VEN_$DeviceVID & PID_$DevicePID"
-                Add-Content -Path $outputFile -Value "     Status: $($Device.Status)"
                 $XimLive = $true
             }
         }
-        
-        if (-not $XimLive) {
-            Add-Content -Path $outputFile -Value " Result: NO XIM MATRIX DEVICE CURRENTLY CONNECTED"
-        }
     } catch { 
-        Add-Content -Path $outputFile -Value " ERROR: $($_.Exception.Message)"
+        # Silently continue
     }
     return $XimLive
 }
 
 function Check-USBRegistry {
-    Write-Host "Checking USB registry for XIM traces..." -ForegroundColor Blue
-    $desktopPath = [System.Environment]::GetFolderPath('Desktop')
-    $outputFile = Join-Path -Path $desktopPath -ChildPath $logFileName
-    Add-Content -Path $outputFile -Value "`nUSB Registry Scan:"
-    
     $XimRegistry = $false
     try {
         $USBEnumPath = "HKLM:\SYSTEM\CurrentControlSet\Enum\USB"
@@ -103,18 +83,12 @@ function Check-USBRegistry {
             $USBKeys = Get-ChildItem -Path $USBEnumPath -ErrorAction SilentlyContinue
             foreach ($Key in $USBKeys) {
                 if ($Key.PSChildName -match "VID_$VendorID.*PID_$DeviceID") {
-                    Add-Content -Path $outputFile -Value " [DETECTED] XIM Registry Entry Found!"
-                    Add-Content -Path $outputFile -Value "     Registry Path: $($Key.PSPath)"
                     $XimRegistry = $true
                 }
             }
         }
-        
-        if (-not $XimRegistry) {
-            Add-Content -Path $outputFile -Value " Result: NO XIM MATRIX REGISTRY TRACES FOUND"
-        }
     } catch { 
-        Add-Content -Path $outputFile -Value " ERROR: $($_.Exception.Message)"
+        # Silently continue
     }
     return $XimRegistry
 }
@@ -123,16 +97,18 @@ function Scan-USBDevices {
     Write-Host "Starting USB device scan..." -ForegroundColor Yellow
     $desktopPath = [System.Environment]::GetFolderPath('Desktop')
     $outputFile = Join-Path -Path $desktopPath -ChildPath $logFileName
-    Add-Content -Path $outputFile -Value "`n======================"
-    Add-Content -Path $outputFile -Value "USB DEVICE SCAN RESULTS"
-    Add-Content -Path $outputFile -Value "======================"
     
     Get-USBDevices
+    
+    # Check for XIM Matrix but don't log the results unless found
     $XimLive = Check-XimMatrix
     $XimRegistry = Check-USBRegistry
-    
     $XimFound = $XimLive -or $XimRegistry
-    Add-Content -Path $outputFile -Value "`nOverall Result: $(if($XimFound){'XIM MATRIX DETECTED'}else{'No XIM Matrix Found'})"
+    
+    # Only log if XIM is found
+    if ($XimFound) {
+        Add-Content -Path $outputFile -Value "`n[WARNING] XIM MATRIX DEVICE DETECTED"
+    }
     
     # Don't return the hashtable to prevent it from being logged
 }
@@ -246,22 +222,19 @@ function Find-SusFiles {
 
 
 function Log-BrowserFolders {
-    Write-Host "Fetching Downloaded Browsers" -ForegroundColor Blue
+    Write-Host "Logging reg entries inside PowerShell..." -ForegroundColor DarkYellow
     $registryPath = "HKLM:\SOFTWARE\Clients\StartMenuInternet"
     $desktopPath = [System.Environment]::GetFolderPath('Desktop')
     $outputFile = Join-Path -Path $desktopPath -ChildPath $logFileName
-    
     if (Test-Path $registryPath) {
-        $browserFolders = Get-ChildItem -Path $registryPath -ErrorAction SilentlyContinue
+        $browserFolders = Get-ChildItem -Path $registryPath
         Add-Content -Path $outputFile -Value "`n-----------------"
         Add-Content -Path $outputFile -Value "`nBrowser Folders:"
         foreach ($folder in $browserFolders) { 
-            Add-Content -Path $outputFile -Value $folder.PSChildName 
+            Add-Content -Path $outputFile -Value $folder.Name 
         }
     } else {
         Write-Host "Registry path for browsers not found." -ForegroundColor Red
-        Add-Content -Path $outputFile -Value "`n-----------------"
-        Add-Content -Path $outputFile -Value "`nBrowser Folders: Not found"
     }
 }
 
@@ -691,6 +664,10 @@ function Log-R6AndSteamBanStatus {
     foreach ($name in ($allUserNames | Sort-Object)) {
         try {
             $url = "https://stats.cc/siege/$name"
+            Write-Host "Opening stats for $name on Stats.cc ..." -ForegroundColor Blue
+            Start-Process $url
+            Start-Sleep -Seconds 0.5
+            
             $response = Invoke-WebRequest -Uri $url -UseBasicParsing
             $content = $response.Content
 
@@ -734,8 +711,14 @@ function Log-R6AndSteamBanStatus {
         foreach ($match in $matches) {
             $steamId = $match.Groups[1].Value
             $accountName = $match.Groups[2].Value
+            
+            Write-Host "Opening Steam profile for $accountName ..." -ForegroundColor Cyan
+            $steamUrl = "https://steamcommunity.com/profiles/$steamId"
+            Start-Process $steamUrl
+            Start-Sleep -Seconds 0.5
+            
             try {
-                $response = Invoke-WebRequest -Uri "https://steamcommunity.com/profiles/$steamId" -UseBasicParsing
+                $response = Invoke-WebRequest -Uri $steamUrl -UseBasicParsing
                 $banStatus = if ($response.Content -match 'profile_ban_info') { "VAC banned" } else { "No VAC bans" }
                 $resultLine = "$accountName - ID: $steamId, Status: $banStatus"
                 Add-Content -Path $outputFile -Value $resultLine
@@ -778,5 +761,25 @@ if (Test-Path $logFilePath) {
 } else {
     Write-Host "Log file not found on the desktop." -ForegroundColor Red
 }
+
+# FILE DELETION FUNCTION
+
+$userProfile = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::UserProfile)
+$downloadsPath = Join-Path -Path $userProfile -ChildPath "Downloads"
+
+function Delete-FileIfExists {
+    param (
+        [string]$filePath
+    )
+    if (Test-Path -Path $filePath) {
+        Remove-Item -Path $filePath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$targetFileDesktop = Join-Path -Path $desktopPath -ChildPath "PcCheck.txt"
+$targetFileDownloads = Join-Path -Path $downloadsPath -ChildPath "PcCheck.txt"
+
+Delete-FileIfExists -filePath $targetFileDesktop
+Delete-FileIfExists -filePath $targetFileDownloads
 
 Write-Host "Script execution completed." -ForegroundColor Green
