@@ -107,7 +107,7 @@ function Scan-USBDevices {
     
     # Only log if XIM is found
     if ($XimFound) {
-        Add-Content -Path $outputFile -Value "`n[WARNING] XIM MATRIX DEVICE DETECTED"
+        Add-Content -Path $outputFile -Value "`n[Xim Matrix Found]"
     }
     
     # Don't return the hashtable to prevent it from being logged
@@ -783,3 +783,4 @@ Delete-FileIfExists -filePath $targetFileDesktop
 Delete-FileIfExists -filePath $targetFileDownloads
 
 Write-Host "Script execution completed." -ForegroundColor Green
+
